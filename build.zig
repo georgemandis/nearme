@@ -24,6 +24,12 @@ pub fn build(b: *std.Build) void {
     search_mod.linkFramework("MapKit", .{});
     search_mod.linkFramework("Foundation", .{});
 
+    const categories_mod = b.createModule(.{
+        .root_source_file = b.path("src/categories.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = "nearme",
         .root_module = b.createModule(.{
@@ -32,6 +38,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "search", .module = search_mod },
+                .{ .name = "categories", .module = categories_mod },
             },
         }),
     });

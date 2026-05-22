@@ -1,8 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const search = @import("search");
+const categories = @import("categories");
 
-const version = "0.1.0";
+const version = "0.2.0";
 
 fn printUsage(writer: *std.Io.Writer) !void {
     try writer.print(
@@ -19,18 +20,139 @@ fn printUsage(writer: *std.Io.Writer) !void {
         \\  --lon=N              Longitude
         \\  --radius=N           Search radius in meters (default: 2000)
         \\  --count=N            Max results (default: 10)
+        \\  --type=TYPE          Result type: poi, address, all (default: all)
+        \\  --category=CAT       Filter by POI category (e.g. restaurant, cafe)
         \\  --json               Output as JSON
+        \\  --categories         List all available categories
+        \\  --completions=SHELL  Output shell completions (bash, zsh, fish)
         \\  -h, --help           Show help
         \\  -v, --version        Show version
         \\
         \\Examples:
         \\  nearme "pizza" --lat=40.6892 --lon=-73.9857
+        \\  nearme "coffee" --category=cafe --lat=40.6892 --lon=-73.9857
+        \\  nearme "123 Main St" --type=address --lat=40.6892 --lon=-73.9857
         \\  whereami --json | nearme "coffee"
         \\
         \\Created by George Mandis <george@mand.is>
         \\https://github.com/georgemandis/nearme
         \\
     , .{version});
+}
+
+fn printCategories(writer: *std.Io.Writer) !void {
+    try writer.print("Available categories:\n\n", .{});
+    for (&categories.all) |*entry| {
+        try writer.print("  {s}\n", .{entry.cli_name});
+    }
+}
+
+fn printCompletionsBash(writer: *std.Io.Writer) !void {
+    try writer.print(
+        \\_nearme_completions() {{
+        \\  local cur prev opts categories
+        \\  cur="${{COMP_WORDS[COMP_CWORD]}}"
+        \\  prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+        \\
+        \\  opts="--lat= --lon= --radius= --count= --type= --category= --json --categories --completions= --help --version"
+        \\
+    , .{});
+    try writer.print("  categories=\"", .{});
+    for (&categories.all, 0..) |*entry, i| {
+        if (i > 0) try writer.print(" ", .{});
+        try writer.print("{s}", .{entry.cli_name});
+    }
+    try writer.print(
+        \\"
+        \\
+        \\  if [[ "$cur" == --category=* ]]; then
+        \\    local prefix="${{cur%%=*}}="
+        \\    local typed="${{cur#*=}}"
+        \\    COMPREPLY=($(compgen -P "$prefix" -W "$categories" -- "$typed"))
+        \\    return
+        \\  fi
+        \\
+        \\  if [[ "$cur" == --type=* ]]; then
+        \\    local prefix="${{cur%%=*}}="
+        \\    local typed="${{cur#*=}}"
+        \\    COMPREPLY=($(compgen -P "$prefix" -W "poi address all" -- "$typed"))
+        \\    return
+        \\  fi
+        \\
+        \\  if [[ "$cur" == --completions=* ]]; then
+        \\    local prefix="${{cur%%=*}}="
+        \\    local typed="${{cur#*=}}"
+        \\    COMPREPLY=($(compgen -P "$prefix" -W "bash zsh fish" -- "$typed"))
+        \\    return
+        \\  fi
+        \\
+        \\  if [[ "$cur" == -* ]]; then
+        \\    COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+        \\    return
+        \\  fi
+        \\}}
+        \\complete -F _nearme_completions nearme
+        \\
+    , .{});
+}
+
+fn printCompletionsZsh(writer: *std.Io.Writer) !void {
+    try writer.print(
+        \\#compdef nearme
+        \\
+        \\_nearme() {{
+        \\  local -a categories
+        \\  categories=(
+    , .{});
+    try writer.print("\n", .{});
+    for (&categories.all) |*entry| {
+        try writer.print("    '{s}'\n", .{entry.cli_name});
+    }
+    try writer.print(
+        \\  )
+        \\
+        \\  _arguments \
+        \\    '1:query:' \
+        \\    '--lat=[Latitude]:latitude:' \
+        \\    '--lon=[Longitude]:longitude:' \
+        \\    '--radius=[Search radius in meters]:radius:' \
+        \\    '--count=[Max results]:count:' \
+        \\    '--type=[Result type]:type:(poi address all)' \
+        \\    '--category=[POI category]:category:($categories)' \
+        \\    '--json[Output as JSON]' \
+        \\    '--categories[List available categories]' \
+        \\    '--completions=[Shell completions]:shell:(bash zsh fish)' \
+        \\    '(-h --help)'{{-h,--help}}'[Show help]' \
+        \\    '(-v --version)'{{-v,--version}}'[Show version]'
+        \\}}
+        \\
+        \\_nearme "$@"
+        \\
+    , .{});
+}
+
+fn printCompletionsFish(writer: *std.Io.Writer) !void {
+    try writer.print(
+        \\# Fish completions for nearme
+        \\complete -c nearme -l lat -x -d 'Latitude'
+        \\complete -c nearme -l lon -x -d 'Longitude'
+        \\complete -c nearme -l radius -x -d 'Search radius in meters'
+        \\complete -c nearme -l count -x -d 'Max results'
+        \\complete -c nearme -l type -x -a 'poi address all' -d 'Result type'
+        \\complete -c nearme -l json -d 'Output as JSON'
+        \\complete -c nearme -l categories -d 'List available categories'
+        \\complete -c nearme -l completions -x -a 'bash zsh fish' -d 'Output shell completions'
+        \\complete -c nearme -s h -l help -d 'Show help'
+        \\complete -c nearme -s v -l version -d 'Show version'
+        \\
+    , .{});
+    // Category completions
+    try writer.print("complete -c nearme -l category -x -a '", .{});
+    for (&categories.all, 0..) |*entry, i| {
+        if (i > 0) try writer.print(" ", .{});
+        try writer.print("{s}", .{entry.cli_name});
+    }
+    try writer.print("' -d 'POI category'\n", .{});
 }
 
 fn writeJsonString(writer: *std.Io.Writer, s: []const u8) !void {
@@ -48,7 +170,7 @@ fn writeJsonString(writer: *std.Io.Writer, s: []const u8) !void {
 }
 
 fn haversineKm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) f64 {
-    const R = 6371.0; // Earth radius in km
+    const R = 6371.0;
     const toRad = std.math.pi / 180.0;
     const dlat = (lat2 - lat1) * toRad;
     const dlon = (lon2 - lon1) * toRad;
@@ -59,10 +181,22 @@ fn haversineKm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) f64 {
     return R * c;
 }
 
+fn categoryDisplayName(apple_id: []const u8) []const u8 {
+    if (categories.findByAppleId(apple_id)) |entry| return entry.cli_name;
+    // Strip "MKPOICategory" prefix as fallback
+    const prefix = "MKPOICategory";
+    if (std.mem.startsWith(u8, apple_id, prefix)) return apple_id[prefix.len..];
+    return apple_id;
+}
+
 fn printHuman(writer: *std.Io.Writer, places: []const search.Place, center_lat: f64, center_lon: f64) !void {
     for (places, 1..) |place, i| {
         // Line 1: number and name
-        try writer.print("{d}. {s}\n", .{ i, place.name });
+        try writer.print("{d}. {s}", .{ i, place.name });
+        if (place.category) |cat| {
+            try writer.print(" ({s})", .{categoryDisplayName(cat)});
+        }
+        try writer.print("\n", .{});
 
         // Line 2: address
         if (place.address.len > 0) {
@@ -135,6 +269,16 @@ fn printJson(writer: *std.Io.Writer, places: []const search.Place) !void {
             try writer.print("null", .{});
         }
 
+        // category
+        try writer.print(",\"category\":", .{});
+        if (place.category) |cat| {
+            try writer.print("\"", .{});
+            try writeJsonString(writer, categoryDisplayName(cat));
+            try writer.print("\"", .{});
+        } else {
+            try writer.print("null", .{});
+        }
+
         try writer.print("}}", .{});
         if (i < places.len - 1) {
             try writer.print(",", .{});
@@ -161,6 +305,8 @@ pub fn main(init: std.process.Init) !void {
     var radius: f64 = 2000.0;
     var count: usize = 10;
     var json_output = false;
+    var result_type: search.ResultType = .all;
+    var category_filter: ?[]const u8 = null;
 
     var args_iter = try init.minimal.args.iterateAllocator(allocator);
     defer args_iter.deinit();
@@ -173,6 +319,25 @@ pub fn main(init: std.process.Init) !void {
             return;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
             try stdout.interface.print("nearme " ++ version ++ "\n", .{});
+            try stdout.interface.flush();
+            return;
+        } else if (std.mem.eql(u8, arg, "--categories")) {
+            try printCategories(&stdout.interface);
+            try stdout.interface.flush();
+            return;
+        } else if (std.mem.startsWith(u8, arg, "--completions=")) {
+            const shell = arg["--completions=".len..];
+            if (std.mem.eql(u8, shell, "bash")) {
+                try printCompletionsBash(&stdout.interface);
+            } else if (std.mem.eql(u8, shell, "zsh")) {
+                try printCompletionsZsh(&stdout.interface);
+            } else if (std.mem.eql(u8, shell, "fish")) {
+                try printCompletionsFish(&stdout.interface);
+            } else {
+                try stderr.interface.print("Error: unknown shell '{s}' (use bash, zsh, or fish)\n", .{shell});
+                try stderr.interface.flush();
+                std.process.exit(2);
+            }
             try stdout.interface.flush();
             return;
         } else if (std.mem.eql(u8, arg, "--json")) {
@@ -208,6 +373,29 @@ pub fn main(init: std.process.Init) !void {
             };
             if (count == 0) {
                 try stderr.interface.print("Error: --count must be at least 1\n", .{});
+                try stderr.interface.flush();
+                std.process.exit(2);
+            }
+        } else if (std.mem.startsWith(u8, arg, "--type=")) {
+            const type_str = arg["--type=".len..];
+            if (std.mem.eql(u8, type_str, "poi")) {
+                result_type = .poi;
+            } else if (std.mem.eql(u8, type_str, "address")) {
+                result_type = .address;
+            } else if (std.mem.eql(u8, type_str, "all")) {
+                result_type = .all;
+            } else {
+                try stderr.interface.print("Error: unknown type '{s}' (use poi, address, or all)\n", .{type_str});
+                try stderr.interface.flush();
+                std.process.exit(2);
+            }
+        } else if (std.mem.startsWith(u8, arg, "--category=")) {
+            const cat_name = arg["--category=".len..];
+            if (categories.findByCliName(cat_name)) |entry| {
+                category_filter = entry.apple_id;
+            } else {
+                try stderr.interface.print("Error: unknown category '{s}'\n", .{cat_name});
+                try stderr.interface.print("Run 'nearme --categories' to see available categories.\n", .{});
                 try stderr.interface.flush();
                 std.process.exit(2);
             }
@@ -299,7 +487,14 @@ pub fn main(init: std.process.Init) !void {
     const final_query = query.?;
 
     // Perform search
-    const results = search.search(final_query, final_lat, final_lon, radius) catch |err| {
+    const results = search.search(.{
+        .query = final_query,
+        .lat = final_lat,
+        .lon = final_lon,
+        .radius = radius,
+        .result_type = result_type,
+        .category_filter = category_filter,
+    }) catch |err| {
         switch (err) {
             search.SearchError.NotAvailable => {
                 try stderr.interface.print("Error: nearme requires macOS (MapKit)\n", .{});

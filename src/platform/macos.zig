@@ -2,6 +2,8 @@ const std = @import("std");
 const objc = @import("../objc.zig");
 const Place = @import("../search.zig").Place;
 const SearchError = @import("../search.zig").SearchError;
+const SearchOptions = @import("../search.zig").SearchOptions;
+const ResultType = @import("../search.zig").ResultType;
 
 // ---------------------------------------------------------------------------
 // CoreLocation coordinate type
@@ -87,6 +89,18 @@ fn extractUrlString(map_item: objc.id) ?[]const u8 {
     const abs_str: ?objc.id = objc.msgSend(?objc.id, url_obj, objc.sel("absoluteString"), .{});
     const ns_str = abs_str orelse return null;
     const cstr = objc.fromNSString(ns_str) orelse return null;
+    const len = std.mem.len(cstr);
+    if (len == 0) return null;
+    const copy = std.heap.c_allocator.alloc(u8, len) catch return null;
+    @memcpy(copy, cstr[0..len]);
+    return copy;
+}
+
+/// Extract pointOfInterestCategory from MKMapItem (nullable NSString)
+fn extractCategory(map_item: objc.id) ?[]const u8 {
+    const nsstr: ?objc.id = objc.msgSend(?objc.id, map_item, objc.sel("pointOfInterestCategory"), .{});
+    const str = nsstr orelse return null;
+    const cstr = objc.fromNSString(str) orelse return null;
     const len = std.mem.len(cstr);
     if (len == 0) return null;
     const copy = std.heap.c_allocator.alloc(u8, len) catch return null;
@@ -248,6 +262,9 @@ fn searchBlockInvoke(block: *SearchBlockLiteral, response: ?objc.id, err: ?objc.
         // URL
         const url = extractUrlString(map_item);
 
+        // Category
+        const category = extractCategory(map_item);
+
         // Placemark
         const placemark: objc.id = objc.msgSend(objc.id, map_item, objc.sel("placemark"), .{});
 
@@ -264,6 +281,7 @@ fn searchBlockInvoke(block: *SearchBlockLiteral, response: ?objc.id, err: ?objc.
             .longitude = coord.longitude,
             .phone = phone,
             .url = url,
+            .category = category,
         };
     }
 
@@ -292,7 +310,7 @@ fn nsStringFromSlice(slice: []const u8) ?objc.id {
 // Public API
 // ---------------------------------------------------------------------------
 
-pub fn searchPlaces(query: []const u8, lat: f64, lon: f64, radius: f64) SearchError![]Place {
+pub fn searchPlaces(opts: SearchOptions) SearchError![]Place {
     // Reset module state
     search_results = null;
     search_error = null;
@@ -304,18 +322,46 @@ pub fn searchPlaces(query: []const u8, lat: f64, lon: f64, radius: f64) SearchEr
     const request = objc.msgSend(objc.id, req_alloc, objc.sel("init"), .{});
 
     // Set naturalLanguageQuery
-    const query_ns = nsStringFromSlice(query) orelse return SearchError.SearchFailed;
+    const query_ns = nsStringFromSlice(opts.query) orelse return SearchError.SearchFailed;
     objc.msgSend(void, request, objc.sel("setNaturalLanguageQuery:"), .{query_ns});
 
+    // Set resultTypes if not "all"
+    // MKLocalSearchResultType: address = 1, pointOfInterest = 2
+    switch (opts.result_type) {
+        .poi => {
+            objc.msgSend(void, request, objc.sel("setResultTypes:"), .{@as(objc.NSUInteger, 2)});
+        },
+        .address => {
+            objc.msgSend(void, request, objc.sel("setResultTypes:"), .{@as(objc.NSUInteger, 1)});
+        },
+        .all => {},
+    }
+
+    // Set pointOfInterestFilter if category specified
+    if (opts.category_filter) |cat_id| {
+        const MKPointOfInterestFilter = objc.getClass("MKPointOfInterestFilter") orelse return SearchError.NotAvailable;
+        const cat_nsstr = nsStringFromSlice(cat_id) orelse return SearchError.SearchFailed;
+
+        // Build NSArray with one category string
+        const NSArray = objc.getClass("NSArray") orelse return SearchError.NotAvailable;
+        const array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{cat_nsstr});
+
+        // [[MKPointOfInterestFilter alloc] initWithIncludingCategories:]
+        const filter_alloc = objc.msgSend(objc.id, MKPointOfInterestFilter, objc.sel("alloc"), .{});
+        const filter = objc.msgSend(objc.id, filter_alloc, objc.sel("initIncludingCategories:"), .{array});
+
+        objc.msgSend(void, request, objc.sel("setPointOfInterestFilter:"), .{filter});
+    }
+
     // Build MKCoordinateRegion from lat/lon/radius
-    const lat_delta = (radius / 111320.0) * 2.0;
-    const cos_lat = @cos(lat * std.math.pi / 180.0);
-    const lon_delta = (radius / (111320.0 * cos_lat)) * 2.0;
+    const lat_delta = (opts.radius / 111320.0) * 2.0;
+    const cos_lat = @cos(opts.lat * std.math.pi / 180.0);
+    const lon_delta = (opts.radius / (111320.0 * cos_lat)) * 2.0;
 
     const region = MKCoordinateRegion{
         .center = CLLocationCoordinate2D{
-            .latitude = lat,
-            .longitude = lon,
+            .latitude = opts.lat,
+            .longitude = opts.lon,
         },
         .span = MKCoordinateSpan{
             .latitudeDelta = lat_delta,
@@ -367,6 +413,9 @@ pub fn freePlaces(places: []Place) void {
         }
         if (place.url) |url| {
             if (url.len > 0) alloc.free(@constCast(url));
+        }
+        if (place.category) |cat| {
+            if (cat.len > 0) alloc.free(@constCast(cat));
         }
     }
     alloc.free(places);
