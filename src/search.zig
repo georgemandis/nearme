@@ -16,14 +16,15 @@ pub const SearchError = error{
     Timeout,
 };
 
+const platform = switch (builtin.os.tag) {
+    .macos => @import("platform/macos.zig"),
+    else => @compileError("nearme currently requires macOS (MapKit)"),
+};
+
 pub fn search(query: []const u8, lat: f64, lon: f64, radius: f64) SearchError![]Place {
-    _ = query;
-    _ = lat;
-    _ = lon;
-    _ = radius;
-    return SearchError.NotAvailable;
+    return platform.searchPlaces(query, lat, lon, radius);
 }
 
 pub fn freePlaces(places: []Place) void {
-    _ = places;
+    platform.freePlaces(places);
 }
