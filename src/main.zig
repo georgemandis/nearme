@@ -84,12 +84,22 @@ pub fn main(init: std.process.Init) !void {
                 try stderr.interface.flush();
                 std.process.exit(2);
             };
+            if (radius <= 0) {
+                try stderr.interface.print("Error: --radius must be positive\n", .{});
+                try stderr.interface.flush();
+                std.process.exit(2);
+            }
         } else if (std.mem.startsWith(u8, arg, "--count=")) {
             count = std.fmt.parseInt(usize, arg["--count=".len..], 10) catch {
                 try stderr.interface.print("Error: invalid count\n", .{});
                 try stderr.interface.flush();
                 std.process.exit(2);
             };
+            if (count == 0) {
+                try stderr.interface.print("Error: --count must be at least 1\n", .{});
+                try stderr.interface.flush();
+                std.process.exit(2);
+            }
         } else if (std.mem.startsWith(u8, arg, "-")) {
             try stderr.interface.print("Error: unknown flag: {s}\n\n", .{arg});
             try printUsage(&stderr.interface);
