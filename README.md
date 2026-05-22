@@ -1,38 +1,60 @@
 # nearme
 
-A CLI tool that searches for places near given coordinates using native OS APIs. On macOS, wraps MKLocalSearch (MapKit). No API keys, no cloud accounts.
+Search for places near you from the command line. Uses macOS MapKit under the hood — no API keys, no cloud accounts.
 
 Companion to [whereami](https://github.com/georgemandis/whereami).
 
+```bash
+$ whereami --json | nearme "pizza"
+
+1. Norm's Pizza
+   345 Adams St, New York, NY 11201
+   +1 (347) 916-1310 · https://normspizza.com · 470 m
+
+2. Piz-zetta
+   90 Livingston St, Brooklyn, NY 11201
+   +1 (718) 422-7878 · 473 m
+
+3. Pronto Pizza
+   139 Court St, New York, NY 11201
+   +1 (718) 522-2225 · 560 m
+```
+
+Results are sorted by distance and include address, phone, URL, and distance from your search coordinates.
+
 ## Install
 
-Requires Zig 0.16.0 and macOS.
+### Homebrew
+
+```bash
+brew install georgemandis/tap/nearme
+```
+
+### From source
+
+Requires [Zig 0.16.0](https://ziglang.org/download/) and macOS.
 
 ```bash
 git clone https://github.com/georgemandis/nearme.git
 cd nearme
 zig build
+# Binary is at zig-out/bin/nearme
 ```
-
-The binary is at `zig-out/bin/nearme`. Copy it to your PATH or run via `zig build run`.
 
 ## Usage
 
 ```bash
-# Search with explicit coordinates
-nearme "pizza" --lat=40.6892 --lon=-73.9857
-
-# Pipe from whereami
+# Pipe coordinates from whereami
 whereami --json | nearme "coffee"
 
-# JSON output
+# Or specify coordinates directly
+nearme "pizza" --lat=40.6892 --lon=-73.9857
+
+# JSON output for scripting
 whereami --json | nearme "pharmacy" --json
 
-# Limit results
-nearme "restaurant" --lat=40.7128 --lon=-74.0060 --count=5
-
-# Custom search radius (meters)
-nearme "gas station" --lat=40.7128 --lon=-74.0060 --radius=5000
+# Custom radius and result count
+nearme "gas station" --lat=40.7128 --lon=-74.0060 --radius=5000 --count=5
 ```
 
 ### Options
@@ -55,18 +77,44 @@ Options:
 
 ### Coordinates
 
-Three ways to provide coordinates, checked in order:
+Coordinates are resolved in this order:
 
 1. `--lat` and `--lon` flags (highest priority)
-2. Piped JSON on stdin — compatible with `whereami --json` output
+2. Piped JSON on stdin — compatible with `whereami --json`
 3. Neither provided — prints usage and exits
+
+### JSON output
+
+With `--json`, results are a JSON array:
+
+```json
+[
+  {
+    "name": "Norm's Pizza",
+    "address": "345 Adams St, New York, NY 11201",
+    "latitude": 40.6928,
+    "longitude": -73.9886,
+    "phone": "+1 (347) 916-1310",
+    "url": "https://normspizza.com"
+  }
+]
+```
+
+`phone` and `url` may be `null`.
 
 ## How it works
 
-On macOS, nearme uses MapKit's `MKLocalSearch` API through the Objective-C runtime. This is the same search that powers Apple Maps. No API keys needed — it's a system framework.
+nearme calls MapKit's [MKLocalSearch](https://developer.apple.com/documentation/mapkit/mklocalsearch) API through the Objective-C runtime — the same search that powers Apple Maps. The entire tool is written in Zig with no Swift or Objective-C source files; it talks to the ObjC runtime directly via `objc_msgSend`.
 
-The tool is macOS-only because MKLocalSearch is an Apple API. There are no equivalent native place search APIs on Windows or Linux.
+macOS-only. There are no equivalent native place search APIs on Windows or Linux.
 
-## Credits
+## See also
+
+- [whereami](https://github.com/georgemandis/whereami) — get your current coordinates from the command line
+- [loupe](https://github.com/georgemandis/loupe) — computer vision CLI (face detection, OCR, person segmentation)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 Created by [George Mandis](https://george.mand.is).
