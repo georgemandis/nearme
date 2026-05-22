@@ -125,14 +125,71 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     }
 
-    // For now, just print what we parsed (placeholder until stdin + search are wired up)
-    std.mem.doNotOptimizeAway(lat);
-    std.mem.doNotOptimizeAway(lon);
+    // Coordinate resolution: flags > stdin > error
+    if (lat == null or lon == null) {
+        // Try reading from stdin if it's a pipe
+        const stdin_file = std.Io.File.stdin();
+        const stdin_is_tty = stdin_file.isTty(init.io) catch false;
+        if (!stdin_is_tty) {
+            var stdin_buf: [4096]u8 = undefined;
+            var stdin_reader = stdin_file.readerStreaming(init.io, &stdin_buf);
+            var json_buf: [4096]u8 = undefined;
+            var json_len: usize = 0;
+
+            while (true) {
+                const byte = stdin_reader.interface.takeByte() catch break;
+                if (json_len >= json_buf.len) break;
+                json_buf[json_len] = byte;
+                json_len += 1;
+            }
+
+            if (json_len > 0) {
+                const parsed = std.json.parseFromSlice(std.json.Value, allocator, json_buf[0..json_len], .{}) catch {
+                    try stderr.interface.print("Error: could not read coordinates from stdin\n", .{});
+                    try stderr.interface.flush();
+                    std.process.exit(2);
+                };
+                defer parsed.deinit();
+
+                const root = parsed.value;
+                if (root == .object) {
+                    if (root.object.get("latitude")) |lat_val| {
+                        if (lat_val == .float) lat = lat_val.float;
+                        if (lat_val == .integer) lat = @floatFromInt(lat_val.integer);
+                    }
+                    if (root.object.get("longitude")) |lon_val| {
+                        if (lon_val == .float) lon = lon_val.float;
+                        if (lon_val == .integer) lon = @floatFromInt(lon_val.integer);
+                    }
+                }
+
+                if (lat == null or lon == null) {
+                    try stderr.interface.print("Error: could not read coordinates from stdin\n", .{});
+                    try stderr.interface.flush();
+                    std.process.exit(2);
+                }
+            }
+        }
+    }
+
+    // Still no coordinates — print usage
+    if (lat == null or lon == null) {
+        try printUsage(&stderr.interface);
+        try stderr.interface.flush();
+        std.process.exit(1);
+    }
+
+    const final_lat = lat.?;
+    const final_lon = lon.?;
+
+    // Placeholder: print parsed state
+    std.mem.doNotOptimizeAway(final_lat);
+    std.mem.doNotOptimizeAway(final_lon);
     std.mem.doNotOptimizeAway(radius);
     std.mem.doNotOptimizeAway(count);
     std.mem.doNotOptimizeAway(json_output);
     std.mem.doNotOptimizeAway(query);
 
-    try stdout.interface.print("Args parsed OK\n", .{});
+    try stdout.interface.print("Coordinates resolved OK\n", .{});
     try stdout.interface.flush();
 }
