@@ -282,7 +282,11 @@ pub fn main(init: std.process.Init) !void {
     const display_results = if (results.len > count) results[0..count] else results;
 
     if (display_results.len == 0) {
-        try stdout.interface.print("No results found for '{s}' within {d:.0}m.\n", .{ final_query, radius });
+        if (json_output) {
+            try stdout.interface.print("[]\n", .{});
+        } else {
+            try stdout.interface.print("No results found for '{s}' within {d:.0}m.\n", .{ final_query, radius });
+        }
         try stdout.interface.flush();
         return;
     }
