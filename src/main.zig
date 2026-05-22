@@ -33,6 +33,79 @@ fn printUsage(writer: *std.Io.Writer) !void {
     , .{version});
 }
 
+fn writeJsonString(writer: *std.Io.Writer, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '"' => try writer.print("\\\"", .{}),
+            '\\' => try writer.print("\\\\", .{}),
+            '\n' => try writer.print("\\n", .{}),
+            '\r' => try writer.print("\\r", .{}),
+            '\t' => try writer.print("\\t", .{}),
+            0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F => try writer.print("\\u{X:0>4}", .{c}),
+            else => try writer.print("{c}", .{c}),
+        }
+    }
+}
+
+fn printHuman(writer: *std.Io.Writer, places: []const search.Place) !void {
+    for (places, 1..) |place, i| {
+        try writer.print("{d}. {s}", .{ i, place.name });
+        if (place.address.len > 0) {
+            const name_len = place.name.len;
+            const num_width = if (i < 10) @as(usize, 1) else if (i < 100) @as(usize, 2) else @as(usize, 3);
+            const used = num_width + 2 + name_len; // "N. name"
+            if (used < 30) {
+                var pad: usize = 0;
+                while (pad < 30 - used) : (pad += 1) {
+                    try writer.print(" ", .{});
+                }
+            } else {
+                try writer.print("  ", .{});
+            }
+            try writer.print("{s}", .{place.address});
+        }
+        try writer.print("\n", .{});
+    }
+}
+
+fn printJson(writer: *std.Io.Writer, places: []const search.Place) !void {
+    try writer.print("[\n", .{});
+    for (places, 0..) |place, i| {
+        try writer.print("  {{\"name\":\"", .{});
+        try writeJsonString(writer, place.name);
+        try writer.print("\",\"address\":\"", .{});
+        try writeJsonString(writer, place.address);
+        try writer.print("\",\"latitude\":{d},\"longitude\":{d}", .{ place.latitude, place.longitude });
+
+        // phone
+        try writer.print(",\"phone\":", .{});
+        if (place.phone) |p| {
+            try writer.print("\"", .{});
+            try writeJsonString(writer, p);
+            try writer.print("\"", .{});
+        } else {
+            try writer.print("null", .{});
+        }
+
+        // url
+        try writer.print(",\"url\":", .{});
+        if (place.url) |u| {
+            try writer.print("\"", .{});
+            try writeJsonString(writer, u);
+            try writer.print("\"", .{});
+        } else {
+            try writer.print("null", .{});
+        }
+
+        try writer.print("}}", .{});
+        if (i < places.len - 1) {
+            try writer.print(",", .{});
+        }
+        try writer.print("\n", .{});
+    }
+    try writer.print("]\n", .{});
+}
+
 pub fn main(init: std.process.Init) !void {
     const stdout_file = std.Io.File.stdout();
     var stdout_buf: [4096]u8 = undefined;
@@ -185,15 +258,40 @@ pub fn main(init: std.process.Init) !void {
 
     const final_lat = lat.?;
     const final_lon = lon.?;
+    const final_query = query.?;
 
-    // Placeholder: print parsed state
-    std.mem.doNotOptimizeAway(final_lat);
-    std.mem.doNotOptimizeAway(final_lon);
-    std.mem.doNotOptimizeAway(radius);
-    std.mem.doNotOptimizeAway(count);
-    std.mem.doNotOptimizeAway(json_output);
-    std.mem.doNotOptimizeAway(query);
+    // Perform search
+    const results = search.search(final_query, final_lat, final_lon, radius) catch |err| {
+        switch (err) {
+            search.SearchError.NotAvailable => {
+                try stderr.interface.print("Error: nearme requires macOS (MapKit)\n", .{});
+            },
+            search.SearchError.Timeout => {
+                try stderr.interface.print("Error: search timed out\n", .{});
+            },
+            search.SearchError.SearchFailed => {
+                try stderr.interface.print("Error: search failed\n", .{});
+            },
+        }
+        try stderr.interface.flush();
+        std.process.exit(1);
+    };
+    defer search.freePlaces(results);
 
-    try stdout.interface.print("Coordinates resolved OK\n", .{});
+    // Truncate to --count
+    const display_results = if (results.len > count) results[0..count] else results;
+
+    if (display_results.len == 0) {
+        try stderr.interface.print("No results found for '{s}' within {d:.0}m.\n", .{ final_query, radius });
+        try stderr.interface.flush();
+        return;
+    }
+
+    if (json_output) {
+        try printJson(&stdout.interface, display_results);
+    } else {
+        try printHuman(&stdout.interface, display_results);
+    }
+
     try stdout.interface.flush();
 }
