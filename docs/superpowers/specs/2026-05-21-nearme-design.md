@@ -35,7 +35,7 @@ Options:
 Three ways to provide coordinates, checked in order:
 
 1. `--lat` and `--lon` flags (highest priority)
-2. Piped JSON on stdin — if stdin is a pipe, read JSON and extract `latitude`/`longitude` fields. Compatible with `whereami --json` output.
+2. Piped JSON on stdin — detect pipe via `std.posix.isatty(0)` returning false. Read up to 4096 bytes from stdin. Parse with `std.json.parseFromSlice`. Extract `.latitude` and `.longitude` float fields. Compatible with `whereami --json` output.
 3. Neither provided and stdin is not a pipe — print usage and exit 1.
 
 ### Output
@@ -135,7 +135,7 @@ Follows the same pattern as whereami's `reverseGeocode` in `platform/macos.zig`:
 5. Call `[search startWithCompletionHandler:]` with a Zig-constructed ObjC block
 6. Pump `CFRunLoop` until the block callback fires or 10-second timeout
 7. In the block callback: extract `MKMapItem` array from `MKLocalSearchResponse.mapItems`
-8. For each MKMapItem, read: `name`, `placemark.title` (address), `placemark.coordinate` (lat/lon), `phoneNumber`, `url`
+8. For each MKMapItem, read: `name`, `placemark` address components (thoroughfare, locality, administrativeArea, postalCode — same pattern as whereami's `extractPlacemarkField`), `placemark.coordinate` (CLLocationCoordinate2D, 16 bytes / 2 x f64 — same proven pattern as whereami), `phoneNumber`, `url` (NSURL — convert to string via `[url absoluteString]`)
 9. Return array of Place structs
 
 ### ObjC types needed
@@ -144,7 +144,8 @@ Follows the same pattern as whereami's `reverseGeocode` in `platform/macos.zig`:
 - `MKLocalSearch` — init with request, `startWithCompletionHandler:` takes a block
 - `MKLocalSearchResponse` — has `mapItems` (NSArray of MKMapItem)
 - `MKMapItem` — has `name` (NSString), `phoneNumber` (NSString?), `url` (NSURL?), `placemark` (MKPlacemark)
-- `MKPlacemark` — has `title` (NSString?), `coordinate` (CLLocationCoordinate2D)
+- `MKPlacemark` — inherits from `CLPlacemark`. Has `coordinate` (CLLocationCoordinate2D), and address components: `thoroughfare`, `locality`, `administrativeArea`, `postalCode` (all NSString?). Construct formatted address from components, same pattern as whereami's `extractPlacemarkField`.
+- `NSURL` — MKMapItem's `url` property. Convert to string via `[url absoluteString]` which returns NSString.
 
 ### MKCoordinateRegion
 
@@ -161,7 +162,9 @@ To convert radius in meters to span deltas:
 - `latitudeDelta = (radius / 111320.0) * 2.0`
 - `longitudeDelta = (radius / (111320.0 * cos(lat * pi / 180.0))) * 2.0`
 
-Setting the region on the request requires passing this struct. On ARM64, structs over 16 bytes are passed by pointer via `objc_msgSend`. MKCoordinateRegion is 32 bytes (4 x f64), so we may need to handle this carefully — either pass by pointer or use `objc_msgSend_stret` depending on the ABI. This needs verification during implementation.
+Setting the region on the request requires passing this struct via `[request setRegion:]`. On ARM64, MKCoordinateRegion (4 x f64) qualifies as a Homogeneous Floating-point Aggregate (HFA) under AAPCS64. HFAs of up to 4 same-type float members are passed directly in floating-point registers (d0-d3), not by pointer. `objc_msgSend_stret` does not exist on ARM64.
+
+In practice: define MKCoordinateRegion as an `extern struct` in Zig, and pass it directly to `msgSend`. Zig with `.c` callconv will decompose it into 4 f64 register arguments. The existing `objc.zig` `msgSend` wrapper handles up to 4 extra arguments, which should suffice if the compiler treats the struct as a single argument at the Zig level. If Zig decomposes it into 4 separate f64s before the callconv cast, the wrapper may need extending. Verify during implementation.
 
 ### Block ABI
 
@@ -188,6 +191,18 @@ var search_results: ?[]Place = null;
 var search_error: ?SearchError = null;
 var search_completed: bool = false;
 ```
+
+### Memory management
+
+Place struct string fields are extracted from NSString objects inside the block callback, where the caller's allocator is not accessible. Use `std.heap.c_allocator` for these allocations, same as whereami's `extractPlacemarkField`. A `freePlaces` function (analogous to whereami's `freeAddress`) frees all Place string allocations.
+
+### Result count
+
+`MKLocalSearchRequest` does not have a max-results property. Apple returns up to ~10 results. The `--count` flag truncates the returned array to N items after the search completes.
+
+### JSON output
+
+Use manual `writer.print` with escaped braces for JSON serialization, same approach as whereami. Output is a JSON array of Place objects.
 
 ### Frameworks to link in build.zig
 
