@@ -47,24 +47,62 @@ fn writeJsonString(writer: *std.Io.Writer, s: []const u8) !void {
     }
 }
 
-fn printHuman(writer: *std.Io.Writer, places: []const search.Place) !void {
+fn haversineKm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) f64 {
+    const R = 6371.0; // Earth radius in km
+    const toRad = std.math.pi / 180.0;
+    const dlat = (lat2 - lat1) * toRad;
+    const dlon = (lon2 - lon1) * toRad;
+    const a = std.math.sin(dlat / 2.0) * std.math.sin(dlat / 2.0) +
+        std.math.cos(lat1 * toRad) * std.math.cos(lat2 * toRad) *
+        std.math.sin(dlon / 2.0) * std.math.sin(dlon / 2.0);
+    const c = 2.0 * std.math.atan2(std.math.sqrt(a), std.math.sqrt(1.0 - a));
+    return R * c;
+}
+
+fn printHuman(writer: *std.Io.Writer, places: []const search.Place, center_lat: f64, center_lon: f64) !void {
     for (places, 1..) |place, i| {
-        try writer.print("{d}. {s}", .{ i, place.name });
+        // Line 1: number and name
+        try writer.print("{d}. {s}\n", .{ i, place.name });
+
+        // Line 2: address
         if (place.address.len > 0) {
-            const name_len = place.name.len;
-            const num_width = if (i < 10) @as(usize, 1) else if (i < 100) @as(usize, 2) else @as(usize, 3);
-            const used = num_width + 2 + name_len; // "N. name"
-            if (used < 30) {
-                var pad: usize = 0;
-                while (pad < 30 - used) : (pad += 1) {
-                    try writer.print(" ", .{});
-                }
-            } else {
-                try writer.print("  ", .{});
-            }
-            try writer.print("{s}", .{place.address});
+            try writer.print("   {s}\n", .{place.address});
         }
+
+        // Line 3: phone, url, distance — joined with " · "
+        const dist = haversineKm(center_lat, center_lon, place.latitude, place.longitude);
+        var has_detail = false;
+
+        try writer.print("   ", .{});
+
+        if (place.phone) |p| {
+            if (p.len > 0) {
+                try writer.print("{s}", .{p});
+                has_detail = true;
+            }
+        }
+
+        if (place.url) |u| {
+            if (u.len > 0) {
+                if (has_detail) try writer.print(" · ", .{});
+                try writer.print("{s}", .{u});
+                has_detail = true;
+            }
+        }
+
+        if (has_detail) try writer.print(" · ", .{});
+        if (dist < 1.0) {
+            try writer.print("{d:.0} m", .{dist * 1000.0});
+        } else {
+            try writer.print("{d:.1} km", .{dist});
+        }
+
         try writer.print("\n", .{});
+
+        // Blank line between results (except after last)
+        if (i < places.len) {
+            try writer.print("\n", .{});
+        }
     }
 }
 
@@ -278,6 +316,20 @@ pub fn main(init: std.process.Init) !void {
     };
     defer search.freePlaces(results);
 
+    // Sort by distance from search center
+    const SortCtx = struct {
+        lat: f64,
+        lon: f64,
+    };
+    const ctx = SortCtx{ .lat = final_lat, .lon = final_lon };
+    std.mem.sort(search.Place, results, ctx, struct {
+        fn lessThan(c: SortCtx, a: search.Place, b: search.Place) bool {
+            const dist_a = haversineKm(c.lat, c.lon, a.latitude, a.longitude);
+            const dist_b = haversineKm(c.lat, c.lon, b.latitude, b.longitude);
+            return dist_a < dist_b;
+        }
+    }.lessThan);
+
     // Truncate to --count
     const display_results = if (results.len > count) results[0..count] else results;
 
@@ -294,7 +346,7 @@ pub fn main(init: std.process.Init) !void {
     if (json_output) {
         try printJson(&stdout.interface, display_results);
     } else {
-        try printHuman(&stdout.interface, display_results);
+        try printHuman(&stdout.interface, display_results, final_lat, final_lon);
     }
 
     try stdout.interface.flush();
