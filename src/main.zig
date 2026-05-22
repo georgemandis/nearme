@@ -153,13 +153,17 @@ pub fn main(init: std.process.Init) !void {
 
                 const root = parsed.value;
                 if (root == .object) {
-                    if (root.object.get("latitude")) |lat_val| {
-                        if (lat_val == .float) lat = lat_val.float;
-                        if (lat_val == .integer) lat = @floatFromInt(lat_val.integer);
+                    if (lat == null) {
+                        if (root.object.get("latitude")) |lat_val| {
+                            if (lat_val == .float) lat = lat_val.float;
+                            if (lat_val == .integer) lat = @floatFromInt(lat_val.integer);
+                        }
                     }
-                    if (root.object.get("longitude")) |lon_val| {
-                        if (lon_val == .float) lon = lon_val.float;
-                        if (lon_val == .integer) lon = @floatFromInt(lon_val.integer);
+                    if (lon == null) {
+                        if (root.object.get("longitude")) |lon_val| {
+                            if (lon_val == .float) lon = lon_val.float;
+                            if (lon_val == .integer) lon = @floatFromInt(lon_val.integer);
+                        }
                     }
                 }
 
