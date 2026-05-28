@@ -375,6 +375,11 @@ pub fn searchPlaces(opts: SearchOptions) SearchError![]Place {
     const setRegionFn = objc.msgSendFn(void, struct { MKCoordinateRegion });
     setRegionFn(@ptrCast(request), objc.sel("setRegion:"), region);
 
+    // Enforce region as a strict boundary (macOS 15+, MKLocalSearchRegionPriority.required = 1)
+    if (objc.msgSend(bool, request, objc.sel("respondsToSelector:"), .{objc.sel("setRegionPriority:")})) {
+        objc.msgSend(void, request, objc.sel("setRegionPriority:"), .{@as(objc.NSUInteger, 1)});
+    }
+
     // Create MKLocalSearch with request
     const MKLocalSearch = objc.getClass("MKLocalSearch") orelse return SearchError.NotAvailable;
     const search_alloc = objc.msgSend(objc.id, MKLocalSearch, objc.sel("alloc"), .{});

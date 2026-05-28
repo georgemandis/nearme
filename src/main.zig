@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const search = @import("search");
 const categories = @import("categories");
 
-const version = "0.2.0";
+const version = "0.2.1";
 
 fn printUsage(writer: *std.Io.Writer) !void {
     try writer.print(
